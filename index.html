@@ -1,0 +1,1103 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>STLmetre - 3D STL Ölçüm Platformu</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Simgeleri -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Three.js + STLLoader + OrbitControls -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+
+  <style>
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+    canvas {
+      display: block;
+      outline: none;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 flex flex-col h-screen overflow-hidden font-sans select-none">
+
+  <!-- Üst Navigasyon Çubuğu -->
+  <header class="h-14 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4 z-20 flex-shrink-0">
+    <div class="flex items-center space-x-3">
+      <div class="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white font-bold shadow-md shadow-emerald-500/20">
+        <i class="fa-solid fa-ruler-combined text-base"></i>
+      </div>
+      <div>
+        <h1 class="text-sm font-semibold tracking-wide flex items-center gap-2">
+          STLmetre
+          <span class="text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800 px-1.5 py-0.5 rounded font-mono">v1.0</span>
+        </h1>
+        <p class="text-[11px] text-slate-400">Tablaya Sıfırlı STL Ölçüm • A-B Noktası Mesafe (mm / cm)</p>
+      </div>
+    </div>
+
+    <!-- Hızlı Eylem Butonları -->
+    <div class="flex items-center space-x-2">
+      <label class="cursor-pointer bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-2 rounded-md font-medium transition flex items-center gap-1.5 shadow">
+        <i class="fa-solid fa-folder-open"></i> STL Dosyası Seç
+        <input type="file" id="fileInput" accept=".stl" class="hidden">
+      </label>
+      <button id="btnDemoModel" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs px-3 py-2 rounded-md transition flex items-center gap-1.5">
+        <i class="fa-solid fa-shapes text-amber-400"></i> Demo Parça Yükle
+      </button>
+      <button id="btnSnapToBed" title="Modeli Tablaya Sıfırla (Y=0)" class="bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 text-xs px-2.5 py-2 rounded-md transition flex items-center gap-1.5">
+        <i class="fa-solid fa-arrow-down-to-bracket"></i> Tablaya Oturt
+      </button>
+      <button id="btnResetView" title="Kamerayı Modele Odakla" class="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 p-2 rounded-md text-xs">
+        <i class="fa-solid fa-arrows-to-dot"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- Ana Çalışma Alanı -->
+  <div class="flex-1 flex overflow-hidden relative">
+
+    <!-- 3D Görselleştirici (Canvas Container) -->
+    <div id="viewerContainer" class="flex-1 h-full relative cursor-crosshair bg-slate-950">
+      
+      <!-- Yükleniyor Ekranı -->
+      <div id="loadingOverlay" class="absolute inset-0 bg-slate-950/85 backdrop-blur-sm z-30 flex flex-col items-center justify-center hidden">
+        <i class="fa-solid fa-circle-notch fa-spin text-4xl text-emerald-500 mb-3"></i>
+        <span class="text-sm font-medium text-slate-200" id="loadingText">Model yükleniyor...</span>
+      </div>
+
+      <!-- Sürükle Bırak Bildirimi -->
+      <div id="dropZone" class="absolute inset-4 border-2 border-dashed border-emerald-500/50 rounded-xl bg-emerald-950/20 z-10 pointer-events-none hidden flex flex-col items-center justify-center">
+        <i class="fa-solid fa-file-arrow-up text-5xl text-emerald-400 mb-2"></i>
+        <p class="text-sm font-semibold text-emerald-200">STL Dosyasını Buraya Bırakın</p>
+      </div>
+
+      <!-- 3D Sol HUD Araç Çubuğu -->
+      <div class="absolute top-4 left-4 z-10 flex flex-col gap-2 bg-slate-900/90 backdrop-blur border border-slate-800 p-2 rounded-lg shadow-2xl text-xs w-60">
+        <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider px-1">Ölçüm Modu</div>
+        
+        <button id="toolDist" class="cad-tool-btn px-2.5 py-2 rounded-md flex items-center justify-between text-left bg-emerald-600 text-white font-medium shadow" data-mode="distance">
+          <span class="flex items-center gap-2">
+            <i class="fa-solid fa-arrows-left-right w-4 text-white"></i> A-B 2 Noktalı Mesafe
+          </span>
+          <span class="text-[10px] bg-emerald-800/80 px-1.5 py-0.5 rounded font-mono">Varsayılan</span>
+        </button>
+
+        <button id="toolCircle" class="cad-tool-btn px-2.5 py-2 rounded-md flex items-center justify-between text-left text-slate-300 hover:bg-slate-800" data-mode="circle">
+          <span class="flex items-center gap-2">
+            <i class="fa-regular fa-circle-dot w-4 text-cyan-400"></i> 3 Noktalı Çap (Ø)
+          </span>
+        </button>
+
+        <button id="toolSlice" class="cad-tool-btn px-2.5 py-2 rounded-md flex items-center justify-between text-left text-slate-300 hover:bg-slate-800" data-mode="slice">
+          <span class="flex items-center gap-2">
+            <i class="fa-solid fa-layer-group w-4 text-amber-400"></i> Z Kesit Analizörü
+          </span>
+          <span class="text-[10px] text-amber-400/80">İsteğe Bağlı</span>
+        </button>
+
+        <button id="toolOrbit" class="cad-tool-btn px-2.5 py-2 rounded-md flex items-center justify-between text-left text-slate-300 hover:bg-slate-800" data-mode="orbit">
+          <span class="flex items-center gap-2">
+            <i class="fa-solid fa-arrows-spin w-4 text-slate-400"></i> Serbest Gezin / İncele
+          </span>
+        </button>
+
+        <div class="border-t border-slate-800 my-1"></div>
+
+        <!-- Snap & Görünüm Ayarları -->
+        <label class="flex items-center justify-between px-1 text-[11px] text-slate-300 cursor-pointer hover:text-white">
+          <span class="flex items-center gap-1.5">
+            <i class="fa-solid fa-magnet text-yellow-400"></i> Köşe Yakalama (Snap)
+          </span>
+          <input type="checkbox" id="toggleSnap" checked class="rounded accent-emerald-500 cursor-pointer">
+        </label>
+        
+        <label class="flex items-center justify-between px-1 text-[11px] text-slate-300 cursor-pointer hover:text-white">
+          <span class="flex items-center gap-1.5">
+            <i class="fa-solid fa-border-all text-slate-400"></i> 3D Baskı Tablası
+          </span>
+          <input type="checkbox" id="toggleGrid" checked class="rounded accent-emerald-500 cursor-pointer">
+        </label>
+
+        <label class="flex items-center justify-between px-1 text-[11px] text-slate-300 cursor-pointer hover:text-white">
+          <span class="flex items-center gap-1.5">
+            <i class="fa-solid fa-cubes text-blue-400"></i> Tel Kafes
+          </span>
+          <input type="checkbox" id="toggleWireframe" class="rounded accent-emerald-500 cursor-pointer">
+        </label>
+      </div>
+
+      <!-- Bilgi İpucu Bildirimi (Alt Orta) -->
+      <div id="tipBox" class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-slate-900/90 border border-slate-700/80 backdrop-blur px-4 py-2 rounded-full text-xs text-slate-200 shadow-xl flex items-center gap-2">
+        <i class="fa-solid fa-info-circle text-emerald-400"></i>
+        <span id="tipText">A noktasını belirlemek için model üzerinde bir yere tıklayın.</span>
+      </div>
+    </div>
+
+    <!-- Sağ Ölçüm & Geometri Paneli -->
+    <aside class="w-80 md:w-96 bg-slate-900 border-l border-slate-800 flex flex-col h-full z-20 flex-shrink-0 text-xs">
+      
+      <!-- Panel Başlığı -->
+      <div class="p-3 border-b border-slate-800 flex items-center justify-between bg-slate-900/70">
+        <span class="font-semibold text-slate-200 flex items-center gap-2">
+          <i class="fa-solid fa-calculator text-emerald-400"></i> Ölçüm Masası & Sonuçlar
+        </span>
+        <button id="btnClearAll" title="Ölçümleri Temizle" class="text-slate-400 hover:text-rose-400 text-xs flex items-center gap-1 transition">
+          <i class="fa-solid fa-trash-can"></i> Temizle
+        </button>
+      </div>
+
+      <!-- Panel İçeriği -->
+      <div class="flex-1 overflow-y-auto p-4 space-y-4">
+
+        <!-- Canlı A-B Mesafe Kartı -->
+        <div id="activeDistanceCard" class="bg-slate-950/90 border border-emerald-900/50 rounded-xl p-3.5 space-y-2.5 shadow-lg">
+          <div class="flex items-center justify-between">
+            <span class="font-semibold text-emerald-400 flex items-center gap-1.5">
+              <i class="fa-solid fa-ruler"></i> A-B Noktası Mesafesi
+            </span>
+            <span id="abStatusBadge" class="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full font-mono">A Noktası Bekleniyor</span>
+          </div>
+
+          <!-- Sonuç Büyük Değer Kutuları -->
+          <div class="grid grid-cols-2 gap-2 text-center pt-1">
+            <div class="bg-slate-900 border border-slate-800 rounded-lg p-2">
+              <span class="text-[10px] text-slate-400 uppercase tracking-wider block">Milimetre</span>
+              <span id="distValMM" class="text-xl font-bold font-mono text-emerald-400">0.00</span>
+              <span class="text-xs text-slate-500 font-mono"> mm</span>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 rounded-lg p-2">
+              <span class="text-[10px] text-slate-400 uppercase tracking-wider block">Santimetre</span>
+              <span id="distValCM" class="text-xl font-bold font-mono text-cyan-400">0.00</span>
+              <span class="text-xs text-slate-500 font-mono"> cm</span>
+            </div>
+          </div>
+
+          <!-- Koordinat ve Delta Dağılımı -->
+          <div class="bg-slate-900/70 border border-slate-800/80 rounded-lg p-2 text-[11px] font-mono space-y-1">
+            <div class="flex justify-between text-slate-400">
+              <span class="text-emerald-400 font-semibold">Nokta A:</span>
+              <span id="coordA">--</span>
+            </div>
+            <div class="flex justify-between text-slate-400">
+              <span class="text-cyan-400 font-semibold">Nokta B:</span>
+              <span id="coordB">--</span>
+            </div>
+            <div class="pt-1 mt-1 border-t border-slate-800 flex justify-between text-[10px] text-slate-400">
+              <span>ΔX: <b id="deltaX" class="text-slate-300">--</b></span>
+              <span>ΔY: <b id="deltaY" class="text-slate-300">--</b></span>
+              <span>ΔZ: <b id="deltaZ" class="text-slate-300">--</b></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Z Kesit Paneli -->
+        <div id="slicePanel" class="bg-slate-950/80 border border-amber-900/50 rounded-xl p-3.5 space-y-3 hidden">
+          <div class="flex items-center justify-between">
+            <span class="font-semibold text-amber-400 flex items-center gap-1.5">
+              <i class="fa-solid fa-layer-group"></i> Yükseklik Kesit Analizörü
+            </span>
+            <span id="sliceHeightDisplay" class="font-mono text-amber-300 bg-amber-950/70 border border-amber-800/70 px-2 py-0.5 rounded text-[11px]">Yükseklik: 0.0 mm</span>
+          </div>
+          <p class="text-[11px] text-slate-400">Modeli tabladan itibaren istenilen yükseklikte dilimleyerek iç ve dış çapları çıkarır.</p>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-slate-400 mb-1">
+              <span>Kesit Seviyesi (Tabladan İtibaren):</span>
+            </div>
+            <input type="range" id="sliceSlider" min="0" max="100" value="50" class="w-full accent-amber-500 cursor-pointer">
+          </div>
+
+          <button id="btnExecuteSlice" class="w-full bg-amber-600 hover:bg-amber-500 text-white py-1.5 rounded-md font-medium text-xs transition flex items-center justify-center gap-1.5 shadow">
+            <i class="fa-solid fa-chart-pie"></i> Bu Düzlemi Ölç & Analiz Et
+          </button>
+
+          <!-- Kesit Sonuçları -->
+          <div id="sliceResults" class="space-y-2 pt-2 border-t border-slate-800 hidden">
+            <div class="bg-slate-900 border border-slate-800 rounded p-2 flex justify-between items-center">
+              <div>
+                <span class="text-[10px] text-slate-400 block uppercase">Tahmini Dış Çap (OD)</span>
+                <span id="resOD" class="font-mono text-emerald-400 font-bold text-sm">--</span>
+              </div>
+              <i class="fa-regular fa-circle text-emerald-500 text-lg"></i>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 rounded p-2 flex justify-between items-center">
+              <div>
+                <span class="text-[10px] text-slate-400 block uppercase">Tahmini İç Çap (ID / Delik)</span>
+                <span id="resID" class="font-mono text-cyan-400 font-bold text-sm">--</span>
+              </div>
+              <i class="fa-regular fa-circle-dot text-cyan-500 text-lg"></i>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 rounded p-2 flex justify-between items-center">
+              <div>
+                <span class="text-[10px] text-slate-400 block uppercase">Et Kalınlığı</span>
+                <span id="resWall" class="font-mono text-amber-300 font-bold text-sm">--</span>
+              </div>
+              <i class="fa-solid fa-arrows-left-right text-amber-400 text-lg"></i>
+            </div>
+          </div>
+        </div>
+
+        <!-- Model Boyutları (Bounding Box) -->
+        <div class="bg-slate-950/70 border border-slate-800 rounded-xl p-3">
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-semibold text-slate-300">Model Ölçüleri</span>
+            <span id="stlFileName" class="text-[10px] text-slate-400 truncate max-w-[130px]">Demo_Burc.stl</span>
+          </div>
+          <div class="grid grid-cols-3 gap-2 text-center font-mono">
+            <div class="bg-slate-900 border border-slate-800 rounded p-1.5">
+              <span class="text-[10px] text-slate-500 block">X (Genişlik)</span>
+              <span id="dimX" class="text-blue-400 font-bold">--</span> <span class="text-[9px] text-slate-500">mm</span>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 rounded p-1.5">
+              <span class="text-[10px] text-slate-500 block">Y (Yükseklik)</span>
+              <span id="dimZ" class="text-amber-400 font-bold">--</span> <span class="text-[9px] text-slate-500">mm</span>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 rounded p-1.5">
+              <span class="text-[10px] text-slate-500 block">Z (Derinlik)</span>
+              <span id="dimY" class="text-emerald-400 font-bold">--</span> <span class="text-[9px] text-slate-500">mm</span>
+            </div>
+          </div>
+          <div class="flex justify-between items-center mt-2 pt-2 border-t border-slate-800 text-[11px] text-slate-400">
+            <span>Tabladaki Y Konumu:</span>
+            <span class="font-mono text-emerald-400 font-semibold">0.0 mm (Sıfır Taban)</span>
+          </div>
+        </div>
+
+        <!-- Ölçüm Geçmişi ve Kayıt Listesi -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-semibold text-slate-300">Ölçüm Geçmişi</span>
+            <button id="btnExportReport" class="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition">
+              <i class="fa-solid fa-download"></i> Rapor Al (.txt)
+            </button>
+          </div>
+          <div id="measurementHistory" class="space-y-2">
+            <div class="text-[11px] text-slate-500 italic p-3 text-center border border-dashed border-slate-800 rounded-lg">
+              Henüz kayıtlı ölçüm yok. Model üzerinde A ve B noktalarını seçin.
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Alt Durum Çubuğu -->
+      <div class="p-3 bg-slate-950 border-t border-slate-800 text-[10px] text-slate-400 flex justify-between items-center">
+        <span>Baskı Tablası: <strong>Y = 0 Düzlemi</strong></span>
+        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Sistem Hazır</span>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    // --- 1. GLOBAL DEĞİŞKENLER VE THREE.JS TANIMLARI ---
+    let scene, camera, renderer, controls;
+    let currentMesh = null;
+    let stlGeometry = null;
+    let raycaster, mouse;
+    let currentMode = 'distance';
+    let hoverSphere = null;
+    let isSnapEnabled = true;
+
+    // Tıklama vs Sürükleme ayrımı
+    let pointerDownPos = { x: 0, y: 0 };
+    
+    // Ölçüm Noktaları
+    let activePickedPoints = [];
+    let pointMarkers = [];
+    let measurementObjects = [];
+    let measurementHistory = [];
+
+    // Z Kesit (Slice) Elemanları
+    let slicePlaneMesh = null;
+    let sliceContourLine = null;
+    let modelBounds = { min: new THREE.Vector3(), max: new THREE.Vector3(), size: new THREE.Vector3() };
+
+    const container = document.getElementById('viewerContainer');
+    const tipText = document.getElementById('tipText');
+    const loadingOverlay = document.getElementById('loadingOverlay');
+
+    // --- 2. THREE.JS SAHNESİNİN KURULUMU ---
+    function initThree() {
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x020617); // Slate-950
+
+      const aspect = container.clientWidth / container.clientHeight;
+      camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 3000);
+      camera.position.set(110, 110, 110);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      container.appendChild(renderer.domElement);
+
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+      controls.maxDistance = 2000;
+      controls.minDistance = 2;
+
+      // Işıklandırma
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
+      scene.add(ambientLight);
+
+      const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.85);
+      dirLight1.position.set(160, 240, 180);
+      scene.add(dirLight1);
+
+      const dirLight2 = new THREE.DirectionalLight(0x60a5fa, 0.4);
+      dirLight2.position.set(-150, -100, -150);
+      scene.add(dirLight2);
+
+      // 3D Baskı Tablası (Grid) - Y=0 seviyesinde
+      createPrintBed();
+
+      // Canlı Fare İşaretçisi (Hover Marker)
+      const hoverGeom = new THREE.SphereGeometry(1.2, 16, 16);
+      const hoverMat = new THREE.MeshBasicMaterial({ color: 0xfacc15, depthTest: false, transparent: true, opacity: 0.85 });
+      hoverSphere = new THREE.Mesh(hoverGeom, hoverMat);
+      hoverSphere.renderOrder = 1000;
+      hoverSphere.visible = false;
+      scene.add(hoverSphere);
+
+      // Raycaster
+      raycaster = new THREE.Raycaster();
+      raycaster.params.Mesh = { doubleSided: true };
+      mouse = new THREE.Vector2();
+
+      // Olay Dinleyicileri
+      window.addEventListener('resize', onWindowResize);
+      
+      const canvasEl = renderer.domElement;
+      canvasEl.addEventListener('pointerdown', onPointerDown);
+      canvasEl.addEventListener('pointerup', onPointerUp);
+      canvasEl.addEventListener('pointermove', onPointerMove);
+
+      animate();
+    }
+
+    function createPrintBed() {
+      const grid = new THREE.GridHelper(260, 52, 0x10b981, 0x1e293b);
+      grid.position.y = 0; // Tabla zemin düzeyi (Y=0)
+      grid.name = "gridHelper";
+      scene.add(grid);
+
+      const axesHelper = new THREE.AxesHelper(35);
+      axesHelper.position.set(0, 0.05, 0);
+      axesHelper.renderOrder = 1;
+      scene.add(axesHelper);
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    function onWindowResize() {
+      if (!container) return;
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    }
+
+    // --- 3. MODELİ TABLAYA OTURTMA (Y = 0) ---
+    function snapModelToBed() {
+      if (!currentMesh || !stlGeometry) return;
+
+      stlGeometry.computeBoundingBox();
+      const box = stlGeometry.boundingBox;
+      
+      const centerX = (box.min.x + box.max.x) / 2;
+      const minY = box.min.y;
+      const centerZ = (box.min.z + box.max.z) / 2;
+
+      stlGeometry.translate(-centerX, -minY, -centerZ);
+      stlGeometry.computeBoundingBox();
+
+      currentMesh.position.set(0, 0, 0);
+      updateModelBounds();
+      fitCameraToObject(currentMesh);
+      showTipMessage("✓ Model başarıyla tablaya oturtuldu (En alt taban Y = 0 mm).");
+    }
+
+    function updateModelBounds() {
+      stlGeometry.computeBoundingBox();
+      modelBounds.min.copy(stlGeometry.boundingBox.min);
+      modelBounds.max.copy(stlGeometry.boundingBox.max);
+      stlGeometry.boundingBox.getSize(modelBounds.size);
+
+      document.getElementById('dimX').innerText = modelBounds.size.x.toFixed(1);
+      document.getElementById('dimY').innerText = modelBounds.size.z.toFixed(1);
+      document.getElementById('dimZ').innerText = modelBounds.size.y.toFixed(1);
+
+      const sliceSlider = document.getElementById('sliceSlider');
+      sliceSlider.min = "0.0";
+      sliceSlider.max = modelBounds.size.y.toFixed(1);
+      sliceSlider.step = "0.2";
+      sliceSlider.value = (modelBounds.size.y / 2).toFixed(1);
+    }
+
+    function onPointerDown(event) {
+      pointerDownPos.x = event.clientX;
+      pointerDownPos.y = event.clientY;
+    }
+
+    function onPointerUp(event) {
+      if (!currentMesh || currentMode === 'orbit' || currentMode === 'slice') return;
+
+      const deltaX = Math.abs(event.clientX - pointerDownPos.x);
+      const deltaY = Math.abs(event.clientY - pointerDownPos.y);
+
+      if (deltaX > 5 || deltaY > 5) return;
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObject(currentMesh, true);
+
+      if (intersects.length > 0) {
+        let targetPoint = intersects[0].point;
+
+        if (isSnapEnabled && intersects[0].face) {
+          targetPoint = getClosestVertexToIntersection(intersects[0], currentMesh.geometry);
+        }
+
+        handlePointSelection(targetPoint);
+      }
+    }
+
+    function onPointerMove(event) {
+      if (!currentMesh || currentMode === 'orbit' || currentMode === 'slice') {
+        if (hoverSphere) hoverSphere.visible = false;
+        return;
+      }
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObject(currentMesh, true);
+
+      if (intersects.length > 0) {
+        let hoverPos = intersects[0].point;
+        if (isSnapEnabled && intersects[0].face) {
+          hoverPos = getClosestVertexToIntersection(intersects[0], currentMesh.geometry);
+        }
+        hoverSphere.position.copy(hoverPos);
+        hoverSphere.visible = true;
+      } else {
+        hoverSphere.visible = false;
+      }
+    }
+
+    function getClosestVertexToIntersection(intersect, geom) {
+      const posAttr = geom.attributes.position;
+      const face = intersect.face;
+      const hit = intersect.point;
+
+      const vA = new THREE.Vector3().fromBufferAttribute(posAttr, face.a);
+      const vB = new THREE.Vector3().fromBufferAttribute(posAttr, face.b);
+      const vC = new THREE.Vector3().fromBufferAttribute(posAttr, face.c);
+
+      let closest = vA;
+      let minDist = hit.distanceTo(vA);
+
+      const distB = hit.distanceTo(vB);
+      if (distB < minDist) {
+        minDist = distB;
+        closest = vB;
+      }
+
+      const distC = hit.distanceTo(vC);
+      if (distC < minDist) {
+        closest = vC;
+      }
+
+      return hit.distanceTo(closest) < (modelBounds.size.length() * 0.18) ? closest : hit;
+    }
+
+    function handlePointSelection(point) {
+      activePickedPoints.push(point.clone());
+
+      // MOD: 2 Noktalı Mesafe (A -> B)
+      if (currentMode === 'distance') {
+        if (activePickedPoints.length === 1) {
+          addPointMarker(point, 'A', 0x10b981);
+          document.getElementById('coordA').innerText = `X:${point.x.toFixed(1)}, Y:${point.y.toFixed(1)}, Z:${point.z.toFixed(1)}`;
+          document.getElementById('coordB').innerText = `Tıklayın...`;
+          document.getElementById('abStatusBadge').innerText = "B Noktası Bekleniyor";
+          document.getElementById('abStatusBadge').className = "text-[10px] bg-cyan-950 text-cyan-300 border border-cyan-800 px-2 py-0.5 rounded-full font-mono";
+          showTipMessage("✓ A Noktası işaretlendi. Şimdi mesafeyi ölçmek için B noktasına tıklayın.");
+        } else if (activePickedPoints.length === 2) {
+          const pA = activePickedPoints[0];
+          const pB = activePickedPoints[1];
+          addPointMarker(point, 'B', 0x06b6d4);
+
+          const distMM = pA.distanceTo(pB);
+          const distCM = distMM / 10;
+
+          const dx = Math.abs(pB.x - pA.x);
+          const dy = Math.abs(pB.y - pA.y);
+          const dz = Math.abs(pB.z - pA.z);
+
+          document.getElementById('distValMM').innerText = distMM.toFixed(2);
+          document.getElementById('distValCM').innerText = distCM.toFixed(3);
+          document.getElementById('coordB').innerText = `X:${pB.x.toFixed(1)}, Y:${pB.y.toFixed(1)}, Z:${pB.z.toFixed(1)}`;
+          document.getElementById('deltaX').innerText = `${dx.toFixed(1)} mm`;
+          document.getElementById('deltaY').innerText = `${dy.toFixed(1)} mm`;
+          document.getElementById('deltaZ').innerText = `${dz.toFixed(1)} mm`;
+          document.getElementById('abStatusBadge').innerText = "Ölçüm Tamamlandı";
+          document.getElementById('abStatusBadge').className = "text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full font-mono";
+
+          drawDistanceLine(pA, pB, distMM);
+
+          addMeasurementToHistory({
+            type: 'Mesafe (A-B)',
+            title: `${distMM.toFixed(2)} mm (${distCM.toFixed(3)} cm)`,
+            details: `A(${pA.x.toFixed(1)}, ${pA.y.toFixed(1)}, ${pA.z.toFixed(1)}) → B(${pB.x.toFixed(1)}, ${pB.y.toFixed(1)}, ${pB.z.toFixed(1)}) | ΔY: ${dy.toFixed(1)}mm`,
+            value: `${distMM.toFixed(2)} mm`
+          });
+
+          showTipMessage(`✓ Ölçüm Tamam: A'dan B'ye = ${distMM.toFixed(2)} mm (${distCM.toFixed(3)} cm)`);
+          activePickedPoints = [];
+        }
+      }
+
+      // MOD: 3 Noktalı Daire (Çap/Yarıçap)
+      else if (currentMode === 'circle') {
+        const markerColors = [0xef4444, 0xf59e0b, 0x10b981];
+        addPointMarker(point, `P${activePickedPoints.length}`, markerColors[activePickedPoints.length - 1] || 0xef4444);
+
+        if (activePickedPoints.length === 1) {
+          showTipMessage("✓ 1. Nokta seçildi. Çember üzerinde 2. noktaya tıklayın.");
+        } else if (activePickedPoints.length === 2) {
+          showTipMessage("✓ 2. Nokta seçildi. Çemberi tamamlamak için 3. noktaya tıklayın.");
+        } else if (activePickedPoints.length === 3) {
+          const circleData = fitCircleFrom3Points(activePickedPoints[0], activePickedPoints[1], activePickedPoints[2]);
+
+          if (circleData) {
+            drawCircle3D(circleData);
+            const diaMM = circleData.radius * 2;
+            const diaCM = diaMM / 10;
+
+            addMeasurementToHistory({
+              type: 'Çap (Ø)',
+              title: `Çap: ${diaMM.toFixed(2)} mm (${diaCM.toFixed(3)} cm)`,
+              details: `Yarıçap: ${circleData.radius.toFixed(2)} mm | Merkez: (${circleData.center.x.toFixed(1)}, ${circleData.center.y.toFixed(1)}, ${circleData.center.z.toFixed(1)})`,
+              value: `Ø ${diaMM.toFixed(2)} mm`
+            });
+
+            showTipMessage(`✓ Daire Çapı (Ø): ${diaMM.toFixed(2)} mm (${diaCM.toFixed(3)} cm)`);
+          } else {
+            showTipMessage("⚠️ Seçilen noktalar doğrusal, lütfen çember etrafında 3 nokta seçin.");
+          }
+          activePickedPoints = [];
+        }
+      }
+    }
+
+    function addPointMarker(pos, label = '', color = 0xef4444) {
+      const geom = new THREE.SphereGeometry(1.6, 16, 16);
+      const mat = new THREE.MeshBasicMaterial({ color: color, depthTest: false });
+      const marker = new THREE.Mesh(geom, mat);
+      marker.position.copy(pos);
+      marker.renderOrder = 999;
+      scene.add(marker);
+      pointMarkers.push(marker);
+    }
+
+    function clearPointMarkersOnly() {
+      pointMarkers.forEach(m => scene.remove(m));
+      pointMarkers = [];
+      activePickedPoints = [];
+    }
+
+    function drawDistanceLine(p1, p2, dist) {
+      const mat = new THREE.LineBasicMaterial({ color: 0x10b981, linewidth: 2, depthTest: false });
+      const geom = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+      const line = new THREE.Line(geom, mat);
+      line.renderOrder = 998;
+      scene.add(line);
+      measurementObjects.push(line);
+    }
+
+    function fitCircleFrom3Points(p1, p2, p3) {
+      const v1 = new THREE.Vector3().subVectors(p2, p1);
+      const v2 = new THREE.Vector3().subVectors(p3, p1);
+
+      const normal = new THREE.Vector3().crossVectors(v1, v2).normalize();
+      if (normal.length() === 0) return null;
+
+      const v1len2 = v1.lengthSq();
+      const v2len2 = v2.lengthSq();
+      const cross = new THREE.Vector3().crossVectors(v1, v2);
+
+      if (cross.lengthSq() < 1e-6) return null;
+
+      const t1 = new THREE.Vector3().crossVectors(normal, v1).multiplyScalar(v2len2);
+      const t2 = new THREE.Vector3().crossVectors(v2, normal).multiplyScalar(v1len2);
+      const centerOffset = new THREE.Vector3().addVectors(t1, t2).divideScalar(2 * cross.lengthSq());
+
+      const center = new THREE.Vector3().addVectors(p1, centerOffset);
+      const radius = center.distanceTo(p1);
+
+      return { center, radius, normal };
+    }
+
+    function drawCircle3D(circleData) {
+      const segments = 64;
+      const geom = new THREE.BufferGeometry();
+      const positions = [];
+
+      let u = new THREE.Vector3();
+      if (Math.abs(circleData.normal.z) < 0.99) {
+        u.crossVectors(circleData.normal, new THREE.Vector3(0, 0, 1)).normalize();
+      } else {
+        u.crossVectors(circleData.normal, new THREE.Vector3(1, 0, 0)).normalize();
+      }
+      const v = new THREE.Vector3().crossVectors(circleData.normal, u).normalize();
+
+      for (let i = 0; i <= segments; i++) {
+        const theta = (i / segments) * Math.PI * 2;
+        const pt = new THREE.Vector3()
+          .copy(circleData.center)
+          .addScaledVector(u, Math.cos(theta) * circleData.radius)
+          .addScaledVector(v, Math.sin(theta) * circleData.radius);
+        positions.push(pt.x, pt.y, pt.z);
+      }
+
+      geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      const mat = new THREE.LineBasicMaterial({ color: 0x06b6d4, linewidth: 2, depthTest: false });
+      const circleLine = new THREE.Line(geom, mat);
+      circleLine.renderOrder = 998;
+      scene.add(circleLine);
+      measurementObjects.push(circleLine);
+    }
+
+    function showSliceTool() {
+      document.getElementById('slicePanel').classList.remove('hidden');
+      updateSlicePlaneVisual(parseFloat(document.getElementById('sliceSlider').value));
+      showTipMessage("Yükseklik Kesit Analizörü: Kesit yüksekliğini kaydırıcıyla belirleyin ve analiz edin.");
+    }
+
+    function hideSliceTool() {
+      document.getElementById('slicePanel').classList.add('hidden');
+      if (slicePlaneMesh) {
+        scene.remove(slicePlaneMesh);
+        slicePlaneMesh = null;
+      }
+      if (sliceContourLine) {
+        scene.remove(sliceContourLine);
+        sliceContourLine = null;
+      }
+    }
+
+    function updateSlicePlaneVisual(yHeight) {
+      document.getElementById('sliceHeightDisplay').innerText = `Yükseklik: ${Number(yHeight).toFixed(1)} mm`;
+
+      if (slicePlaneMesh) {
+        scene.remove(slicePlaneMesh);
+      }
+
+      const planeWidth = Math.max(modelBounds.size.x, modelBounds.size.z) * 1.4;
+      const planeGeom = new THREE.PlaneGeometry(planeWidth, planeWidth);
+      planeGeom.rotateX(-Math.PI / 2);
+      const planeMat = new THREE.MeshBasicMaterial({
+        color: 0xf59e0b,
+        transparent: true,
+        opacity: 0.22,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      });
+      slicePlaneMesh = new THREE.Mesh(planeGeom, planeMat);
+      slicePlaneMesh.position.set(0, yHeight, 0);
+      scene.add(slicePlaneMesh);
+    }
+
+    function executeAutoSliceAnalysis() {
+      if (!currentMesh || !stlGeometry) {
+        showTipMessage("Önce bir model yüklemelisiniz.");
+        return;
+      }
+
+      const yCut = parseFloat(document.getElementById('sliceSlider').value);
+      showLoading("Kesit ve radyal çaplar hesaplanıyor...");
+
+      setTimeout(() => {
+        const posAttr = stlGeometry.attributes.position;
+        const intersectionPoints = [];
+
+        const vA = new THREE.Vector3();
+        const vB = new THREE.Vector3();
+        const vC = new THREE.Vector3();
+
+        for (let i = 0; i < posAttr.count; i += 3) {
+          vA.fromBufferAttribute(posAttr, i);
+          vB.fromBufferAttribute(posAttr, i + 1);
+          vC.fromBufferAttribute(posAttr, i + 2);
+
+          const ptsOnCut = [];
+          intersectEdgeWithPlaneY(vA, vB, yCut, ptsOnCut);
+          intersectEdgeWithPlaneY(vB, vC, yCut, ptsOnCut);
+          intersectEdgeWithPlaneY(vC, vA, yCut, ptsOnCut);
+
+          if (ptsOnCut.length === 2) {
+            intersectionPoints.push(ptsOnCut[0], ptsOnCut[1]);
+          }
+        }
+
+        if (intersectionPoints.length < 6) {
+          hideLoading();
+          showTipMessage("Bu yükseklikte parça bulunamadı. Lütfen kaydırıcıyı değiştirin.");
+          return;
+        }
+
+        if (sliceContourLine) scene.remove(sliceContourLine);
+        const lineGeom = new THREE.BufferGeometry().setFromPoints(intersectionPoints);
+        const lineMat = new THREE.LineBasicMaterial({ color: 0xf59e0b, linewidth: 2, depthTest: false });
+        sliceContourLine = new THREE.LineSegments(lineGeom, lineMat);
+        sliceContourLine.renderOrder = 999;
+        scene.add(sliceContourLine);
+        measurementObjects.push(sliceContourLine);
+
+        const radii = intersectionPoints.map(p => Math.sqrt(p.x * p.x + p.z * p.z));
+        radii.sort((a, b) => a - b);
+
+        const p5Idx = Math.floor(radii.length * 0.05);
+        const p95Idx = Math.floor(radii.length * 0.95);
+        
+        const minRadius = radii[p5Idx];
+        const maxRadius = radii[p95Idx];
+
+        const innerDia = minRadius * 2;
+        const outerDia = maxRadius * 2;
+        const wallThickness = (outerDia - innerDia) / 2;
+
+        document.getElementById('sliceResults').classList.remove('hidden');
+        document.getElementById('resOD').innerText = `${outerDia.toFixed(2)} mm (${(outerDia / 10).toFixed(3)} cm)`;
+        document.getElementById('resID').innerText = innerDia > 1.5 ? `${innerDia.toFixed(2)} mm (${(innerDia / 10).toFixed(3)} cm)` : "Yok (Katı Dolu)";
+        document.getElementById('resWall').innerText = innerDia > 1.5 ? `${wallThickness.toFixed(2)} mm` : "--";
+
+        addMeasurementToHistory({
+          type: 'Kesit Analizi',
+          title: `H=${yCut.toFixed(1)} mm | Dış: ${outerDia.toFixed(2)} mm`,
+          details: `İç Çap: ${innerDia > 1.5 ? innerDia.toFixed(2) + ' mm' : 'Dolu'} | Et Kalınlığı: ${wallThickness.toFixed(2)} mm`,
+          value: `OD: ${outerDia.toFixed(2)} mm`
+        });
+
+        hideLoading();
+        showTipMessage(`✓ H=${yCut.toFixed(1)}mm Kesiti: Dış Çap: ${outerDia.toFixed(2)} mm, İç Çap: ${innerDia.toFixed(2)} mm`);
+      }, 100);
+    }
+
+    function intersectEdgeWithPlaneY(p1, p2, yPlane, result) {
+      if ((p1.y <= yPlane && p2.y >= yPlane) || (p1.y >= yPlane && p2.y <= yPlane)) {
+        if (Math.abs(p2.y - p1.y) > 1e-6) {
+          const t = (yPlane - p1.y) / (p2.y - p1.y);
+          const x = p1.x + t * (p2.x - p1.x);
+          const z = p1.z + t * (p2.z - p1.z);
+          result.push(new THREE.Vector3(x, yPlane, z));
+        }
+      }
+    }
+
+    function addMeasurementToHistory(item) {
+      measurementHistory.unshift(item);
+      renderMeasurementHistory();
+    }
+
+    function renderMeasurementHistory() {
+      const containerEl = document.getElementById('measurementHistory');
+      if (measurementHistory.length === 0) {
+        containerEl.innerHTML = `
+          <div class="text-[11px] text-slate-500 italic p-3 text-center border border-dashed border-slate-800 rounded-lg">
+            Henüz kayıtlı ölçüm yok. Model üzerinde A ve B noktalarını seçin.
+          </div>
+        `;
+        return;
+      }
+
+      containerEl.innerHTML = measurementHistory.map((m) => `
+        <div class="bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-lg p-2.5 transition">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-slate-200 text-xs">${m.title}</span>
+            <span class="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-emerald-400">${m.type}</span>
+          </div>
+          <p class="text-[10px] text-slate-400 mt-1">${m.details}</p>
+        </div>
+      `).join('');
+    }
+
+    function clearAllMeasurements() {
+      measurementObjects.forEach(obj => scene.remove(obj));
+      measurementObjects = [];
+      clearPointMarkersOnly();
+      measurementHistory = [];
+      renderMeasurementHistory();
+      
+      document.getElementById('distValMM').innerText = "0.00";
+      document.getElementById('distValCM').innerText = "0.00";
+      document.getElementById('coordA').innerText = "--";
+      document.getElementById('coordB').innerText = "--";
+      document.getElementById('deltaX').innerText = "--";
+      document.getElementById('deltaY').innerText = "--";
+      document.getElementById('deltaZ').innerText = "--";
+      document.getElementById('abStatusBadge').innerText = "A Noktası Bekleniyor";
+      document.getElementById('abStatusBadge').className = "text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full font-mono";
+      document.getElementById('sliceResults').classList.add('hidden');
+      
+      showTipMessage("Tüm ölçümler sıfırlandı.");
+    }
+
+    function setMeasurementMode(mode) {
+      currentMode = mode;
+      clearPointMarkersOnly();
+
+      document.querySelectorAll('.cad-tool-btn').forEach(btn => {
+        if (btn.dataset.mode === mode) {
+          btn.classList.add('bg-emerald-600', 'text-white', 'font-medium');
+          btn.classList.remove('text-slate-300', 'hover:bg-slate-800');
+        } else {
+          btn.classList.remove('bg-emerald-600', 'text-white', 'font-medium');
+          btn.classList.add('text-slate-300', 'hover:bg-slate-800');
+        }
+      });
+
+      if (mode === 'slice') {
+        showSliceTool();
+      } else {
+        hideSliceTool();
+      }
+
+      if (mode === 'distance') {
+        showTipMessage("A-B Mesafe Modu: Model üzerinde 1. noktaya (A) ve ardından 2. noktaya (B) tıklayın.");
+      } else if (mode === 'circle') {
+        showTipMessage("Çap Modu: Dairesel delik veya dış çeper üzerinde 3 farklı noktaya tıklayın.");
+      } else if (mode === 'orbit') {
+        showTipMessage("Serbest Gezinme Modu: Modeli farenizle rahatça döndürün ve inceleyin.");
+      }
+    }
+
+    function showTipMessage(msg) {
+      tipText.innerText = msg;
+    }
+
+    function showLoading(msg) {
+      document.getElementById('loadingText').innerText = msg;
+      loadingOverlay.classList.remove('hidden');
+    }
+
+    function hideLoading() {
+      loadingOverlay.classList.add('hidden');
+    }
+
+    function fitCameraToObject(mesh) {
+      if (!mesh) return;
+      mesh.geometry.computeBoundingBox();
+      const box = mesh.geometry.boundingBox;
+      const size = new THREE.Vector3();
+      const center = new THREE.Vector3();
+      box.getSize(size);
+      box.getCenter(center);
+
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const fov = camera.fov * (Math.PI / 180);
+      let cameraDistance = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.9;
+      cameraDistance = Math.max(cameraDistance, 30);
+
+      camera.position.set(center.x + cameraDistance * 0.8, center.y + cameraDistance * 0.7, center.z + cameraDistance * 0.9);
+      camera.lookAt(center);
+      controls.target.copy(center);
+      controls.update();
+    }
+
+    function setModelMesh(geometry, fileName = "Model.stl") {
+      if (currentMesh) {
+        scene.remove(currentMesh);
+        if (currentMesh.geometry) currentMesh.geometry.dispose();
+        if (currentMesh.material) currentMesh.material.dispose();
+      }
+
+      clearAllMeasurements();
+      geometry.computeVertexNormals();
+
+      const material = new THREE.MeshStandardMaterial({
+        color: 0x38bdf8,
+        metalness: 0.25,
+        roughness: 0.55,
+        side: THREE.DoubleSide
+      });
+
+      currentMesh = new THREE.Mesh(geometry, material);
+      currentMesh.castShadow = true;
+      currentMesh.receiveShadow = true;
+      scene.add(currentMesh);
+      stlGeometry = geometry;
+
+      document.getElementById('stlFileName').innerText = fileName;
+
+      snapModelToBed();
+      setMeasurementMode('distance');
+    }
+
+    function loadSTLFile(file) {
+      if (!file) return;
+      showLoading(`${file.name} yükleniyor ve tablaya oturtuluyor...`);
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const contents = e.target.result;
+          const loader = new THREE.STLLoader();
+          const geometry = loader.parse(contents);
+
+          setModelMesh(geometry, file.name);
+          hideLoading();
+          showTipMessage(`✓ ${file.name} yüklendi!`);
+        } catch (err) {
+          hideLoading();
+          showTipMessage(`Hata: STL okunamadı (${err.message})`);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    // Demo Parça: Flanşlı Silindirik Burç
+    function generateDemoBushingSTL() {
+      showLoading("Demo burç modeli tablaya yerleştiriliyor...");
+
+      setTimeout(() => {
+        const segments = 64;
+        const outerR = 25;
+        const flangeR = 35;
+        const innerR = 13;
+        const totalH = 40;
+        const flangeH = 10;
+
+        const profile = [
+          new THREE.Vector2(innerR, 0),
+          new THREE.Vector2(flangeR, 0),
+          new THREE.Vector2(flangeR, flangeH),
+          new THREE.Vector2(outerR, flangeH),
+          new THREE.Vector2(outerR, totalH),
+          new THREE.Vector2(innerR, totalH),
+          new THREE.Vector2(innerR, 0)
+        ];
+
+        const latheGeom = new THREE.LatheGeometry(profile, segments);
+        setModelMesh(latheGeom, "Demo_Burc_50mm.stl");
+        hideLoading();
+      }, 50);
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      initThree();
+
+      document.getElementById('btnDemoModel').addEventListener('click', generateDemoBushingSTL);
+      document.getElementById('btnSnapToBed').addEventListener('click', snapModelToBed);
+
+      const fileInput = document.getElementById('fileInput');
+      fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) loadSTLFile(e.target.files[0]);
+      });
+
+      const dropZone = document.getElementById('dropZone');
+      window.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('hidden');
+      });
+      window.addEventListener('dragleave', (e) => {
+        if (e.clientX <= 0 || e.clientY <= 0) dropZone.classList.add('hidden');
+      });
+      window.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('hidden');
+        if (e.dataTransfer.files.length > 0) {
+          loadSTLFile(e.dataTransfer.files[0]);
+        }
+      });
+
+      document.getElementById('toolDist').addEventListener('click', () => setMeasurementMode('distance'));
+      document.getElementById('toolCircle').addEventListener('click', () => setMeasurementMode('circle'));
+      document.getElementById('toolSlice').addEventListener('click', () => setMeasurementMode('slice'));
+      document.getElementById('toolOrbit').addEventListener('click', () => setMeasurementMode('orbit'));
+
+      document.getElementById('toggleSnap').addEventListener('change', (e) => {
+        isSnapEnabled = e.target.checked;
+        showTipMessage(isSnapEnabled ? "Köşe Yakalama (Snap) Açık." : "Köşe Yakalama Kapalı.");
+      });
+
+      document.getElementById('toggleWireframe').addEventListener('change', (e) => {
+        if (currentMesh) currentMesh.material.wireframe = e.target.checked;
+      });
+
+      document.getElementById('toggleGrid').addEventListener('change', (e) => {
+        const gridObj = scene.getObjectByName('gridHelper');
+        if (gridObj) gridObj.visible = e.target.checked;
+      });
+
+      document.getElementById('btnResetView').addEventListener('click', () => {
+        if (currentMesh) fitCameraToObject(currentMesh);
+      });
+
+      const sliceSlider = document.getElementById('sliceSlider');
+      sliceSlider.addEventListener('input', (e) => {
+        updateSlicePlaneVisual(parseFloat(e.target.value));
+      });
+      document.getElementById('btnExecuteSlice').addEventListener('click', executeAutoSliceAnalysis);
+
+      document.getElementById('btnClearAll').addEventListener('click', clearAllMeasurements);
+
+      document.getElementById('btnExportReport').addEventListener('click', () => {
+        if (measurementHistory.length === 0) {
+          showTipMessage("Henüz kayıtlı bir ölçüm yok.");
+          return;
+        }
+
+        let report = "=== STLmetre Ölçüm Raporu ===\n";
+        report += `Tarih: ${new Date().toLocaleString('tr-TR')}\n`;
+        report += `Dosya: ${document.getElementById('stlFileName').innerText}\n`;
+        report += `Boyutlar: ${document.getElementById('dimX').innerText} x ${document.getElementById('dimZ').innerText} x ${document.getElementById('dimY').innerText} mm\n\n`;
+        report += "--- ÖLÇÜMLER ---\n";
+
+        measurementHistory.forEach((m, idx) => {
+          report += `${idx + 1}. [${m.type}] ${m.title} | ${m.details}\n`;
+        });
+
+        const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `STLmetre_Rapor_${Date.now()}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+
+      // İlk açılışta demo modeli yükle
+      generateDemoBushingSTL();
+    });
+  </script>
+</body>
+</html>
